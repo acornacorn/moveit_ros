@@ -396,36 +396,12 @@ TEST(LockedRobotState, set2)
   moveit::core::RobotModelPtr model = getModel();
   robot_interaction::LockedRobotState ls1(model);
 
+#if 0
   for (int i = 0 ; i < ls1.getState()->getVariableCount() ; ++i)
   {
     printf(" var[%3d] = %s\n",i, ls1.getState()->getVariableNames()[i].c_str());
   }
-
-  printf("MIM_F:    %f\n",ls1.getState()->getVariablePositions()[MIM_F]);
-  printf("JOINT_F:  %f\n",ls1.getState()->getVariablePositions()[JOINT_F]);
-  printf("          %f\n",ls1.getState()->getVariablePositions()[JOINT_F]
-                          *1.5 + 0.1);
-
-  for (int i = 0 ; i < 1000 ; ++i)
-  {
-    moveit::core::RobotState cp1(*ls1.getState());
-    cp1.setToRandomPositions();
-    cp1.update();
-    ls1.setState(cp1);
-
-#if 0
-    printf("MIM_F:    %f\n",ls1.getState()->getVariablePositions()[MIM_F]);
-    printf("JOINT_F:  %f\n",ls1.getState()->getVariablePositions()[JOINT_F]);
-    printf("          %f\n",ls1.getState()->getVariablePositions()[JOINT_F]
-                            *1.5 + 0.1);
 #endif
-
-    moveit::core::RobotState cp2(*ls1.getState());
-    EXPECT_EQ(cp2.getVariablePositions()[MIM_F],
-              cp2.getVariablePositions()[JOINT_F] * 1.5 + 0.1);
-  }
-
-
 
 
   int cnt1 = 0;
@@ -461,7 +437,9 @@ TEST(LockedRobotState, set2)
   t3.join();
   t4.join();
 
+#if 0
   printf("counts: %d %d %d\n",cnt1,cnt2,cnt3);
+#endif
 }
 
 int main(int argc, char **argv)
