@@ -257,6 +257,9 @@ public:
   void setThreadFunc(robot_interaction::LockedRobotState* locked_state,
                         int* counter,
                         double offset);
+  void modifyThreadFunc(robot_interaction::LockedRobotState* locked_state,
+                        int* counter,
+                        double offset);
 
   void checkThreadFunc(robot_interaction::LockedRobotState* locked_state,
                        int* counter);
@@ -264,6 +267,8 @@ public:
   void waitThreadFunc(robot_interaction::LockedRobotState* locked_state,
                       int** counters,
                       int max);
+
+  void modifyFunc( robot_state::RobotState& state, double val);
 
   void checkState(robot_interaction::LockedRobotState &locked_state);
 
@@ -363,6 +368,46 @@ void MyInfo::setThreadFunc(
   }
 }
 
+void MyInfo::modifyFunc(
+    robot_state::RobotState& state,
+    double val)
+{
+  state.setVariablePosition(JOINT_A, val + 0.00001);
+  state.setVariablePosition(JOINT_C, val + 0.00002);
+  state.setVariablePosition(JOINT_F, val + 0.00003);
+}
+
+// spin, modifying the state to different values
+void MyInfo::modifyThreadFunc(
+    robot_interaction::LockedRobotState* locked_state,
+    int* counter,
+    double offset)
+{
+  bool go = true;
+  while(go)
+  {
+    double val = offset;
+    for (int loops = 0 ; loops < 100 ; ++loops)
+    {
+      val += 0.0001;
+
+      locked_state->modifyState(boost::bind(&MyInfo::modifyFunc,
+                                            this,
+                                            _1,
+                                            val));
+    }
+
+    cnt_lock_.lock();
+    go = !quit_;
+    ++*counter;
+    cnt_lock_.unlock();
+
+    checkState(*locked_state);
+
+    val += 0.000001;
+  }
+}
+
 // spin until all counters reach at least max
 void MyInfo::waitThreadFunc(
             robot_interaction::LockedRobotState* locked_state,
@@ -389,57 +434,156 @@ void MyInfo::waitThreadFunc(
   cnt_lock_.unlock();
 }
 
-TEST(LockedRobotState, set2)
+static void runThreads(int ncheck, int nset, int nmod)
 {
   MyInfo info;
 
   moveit::core::RobotModelPtr model = getModel();
   robot_interaction::LockedRobotState ls1(model);
 
-#if 0
-  for (int i = 0 ; i < ls1.getState()->getVariableCount() ; ++i)
+  int num = ncheck + nset + nmod;
+
+  typedef int *int_ptr;
+  typedef boost::thread * thread_ptr;
+  int *cnt = new int[num];
+  int_ptr *counters = new int_ptr[num+1];
+  thread_ptr *threads = new thread_ptr[num];
+
+  int p = 0;
+  double val = 0.1;
+
+  // These threads check the validity of the RobotState
+  for (int i = 0 ; i < ncheck ; ++i)
   {
-    printf(" var[%3d] = %s\n",i, ls1.getState()->getVariableNames()[i].c_str());
+    cnt[p] = 0;
+    counters[p] = &cnt[p];
+    threads[p] = new boost::thread(&MyInfo::checkThreadFunc,
+                                   &info,
+                                   &ls1,
+                                   &cnt[p]);
+    val += 0.1;
+    p++;
   }
-#endif
 
+  // These threads set the RobotState to new values
+  for (int i = 0 ; i < nset ; ++i)
+  {
+    cnt[p] = 0;
+    counters[p] = &cnt[p];
+    threads[p] = new boost::thread(&MyInfo::setThreadFunc,
+                                   &info,
+                                   &ls1,
+                                   &cnt[p],
+                                   val);
+    val += 0.1;
+    p++;
+  }
 
-  int cnt1 = 0;
-  int cnt2 = 0;
-  int cnt3 = 0;
-  int *counters[] = { &cnt1, &cnt2, &cnt3, NULL };
+  // These threads modify the RobotState in place
+  for (int i = 0 ; i < nmod ; ++i)
+  {
+    cnt[p] = 0;
+    counters[p] = &cnt[p];
+    threads[p] = new boost::thread(&MyInfo::modifyThreadFunc,
+                                   &info,
+                                   &ls1,
+                                   &cnt[p],
+                                   val);
+    val += 0.1;
+    p++;
+  }
 
-  boost::thread t1(&MyInfo::setThreadFunc,
-                   &info,
-                   &ls1,
-                   &cnt1,
-                   .1);
+  ASSERT_EQ(p, num);
+  counters[p] = NULL;
 
-  boost::thread t2(&MyInfo::setThreadFunc,
-                   &info,
-                   &ls1,
-                   &cnt2,
-                   .2);
-
-  boost::thread t3(&MyInfo::checkThreadFunc,
-                   &info,
-                   &ls1,
-                   &cnt3);
-
-  boost::thread t4(&MyInfo::waitThreadFunc,
+  // this thread waits for all the other threads to make progress, then stops
+  // everything.
+  boost::thread wthread(&MyInfo::waitThreadFunc,
                    &info,
                    &ls1,
                    counters,
                    1000);
 
-  t1.join();
-  t2.join();
-  t3.join();
-  t4.join();
+  // wait for all threads to finish
+  for (int i = 0 ; i < p ; ++i)
+  {
+    threads[i]->join();
+    wthread.join();
+  }
 
-#if 0
-  printf("counts: %d %d %d\n",cnt1,cnt2,cnt3);
-#endif
+  // clean up
+  for (int i = 0 ; i < p ; ++i)
+  {
+    delete threads[i];
+  }
+  delete[] cnt;
+  delete[] counters;
+  delete[] threads;
+}
+
+TEST(LockedRobotState, set1)
+{
+  runThreads(1, 1, 0);
+}
+
+TEST(LockedRobotState, set2)
+{
+  runThreads(1, 2, 0);
+}
+
+TEST(LockedRobotState, set3)
+{
+  runThreads(1, 3, 0);
+}
+
+TEST(LockedRobotState, mod1)
+{
+  runThreads(1, 0, 1);
+}
+
+TEST(LockedRobotState, mod2)
+{
+  runThreads(1, 0, 1);
+}
+
+TEST(LockedRobotState, mod3)
+{
+  runThreads(1, 0, 1);
+}
+
+TEST(LockedRobotState, set1mod1)
+{
+  runThreads(1, 1, 1);
+}
+
+TEST(LockedRobotState, set2mod1)
+{
+  runThreads(1, 2, 1);
+}
+
+TEST(LockedRobotState, set1mod2)
+{
+  runThreads(1, 1, 2);
+}
+
+TEST(LockedRobotState, set3mod1)
+{
+  runThreads(1, 3, 1);
+}
+
+TEST(LockedRobotState, set1mod3)
+{
+  runThreads(1, 1, 3);
+}
+
+TEST(LockedRobotState, set3mod3)
+{
+  runThreads(1, 3, 3);
+}
+
+TEST(LockedRobotState, set3mod3c3)
+{
+  runThreads(3, 3, 3);
 }
 
 int main(int argc, char **argv)
@@ -449,3 +593,6 @@ int main(int argc, char **argv)
 
   return RUN_ALL_TESTS();
 }
+
+
+
