@@ -222,7 +222,7 @@ static moveit::core::RobotModelPtr getModel()
   return model;
 }
 
-TEST(LockedRobotState, load1)
+TEST(LockedRobotState, load)
 {
   moveit::core::RobotModelPtr model = getModel();
 
@@ -236,8 +236,232 @@ TEST(LockedRobotState, load1)
   state3->setToDefaultValues();
   robot_interaction::LockedRobotState ls3(state3);
   
+  robot_interaction::LockedRobotStatePtr ls4(
+                    new robot_interaction::LockedRobotState(model));
+}
+
+enum {
+  JOINT_A = 3,
+  JOINT_C = 4,
+  MIM_F   = 5,
+  JOINT_F = 6
+};
+
+class MyInfo
+{
+public:
+  MyInfo()
+    : quit_(false)
+  {}
+
+  void setThreadFunc(robot_interaction::LockedRobotState* locked_state,
+                        int* counter,
+                        double offset);
+
+  void checkThreadFunc(robot_interaction::LockedRobotState* locked_state,
+                       int* counter);
+
+  void waitThreadFunc(robot_interaction::LockedRobotState* locked_state,
+                      int** counters,
+                      int max);
+
+  void checkState(robot_interaction::LockedRobotState &locked_state);
+
+  boost::mutex cnt_lock_;
+  boost::condition_variable state_available_condition_;
+  bool quit_;
+};
+
+// Check the state.  It should always be valid.
+void MyInfo::checkState(robot_interaction::LockedRobotState &locked_state)
+{
+  robot_state::RobotStateConstPtr s = locked_state.getState();
   
-  
+  robot_state::RobotState cp1(*s);
+
+  // take some time
+  cnt_lock_.lock();
+  cnt_lock_.unlock();
+  cnt_lock_.lock();
+  cnt_lock_.unlock();
+  cnt_lock_.lock();
+  cnt_lock_.unlock();
+
+  // check mim_f == joint_f
+  EXPECT_EQ(s->getVariablePositions()[MIM_F],
+            s->getVariablePositions()[JOINT_F] * 1.5 + 0.1);
+
+  robot_state::RobotState cp2(*s);
+
+  EXPECT_NE(cp1.getVariablePositions(), cp2.getVariablePositions());
+  EXPECT_NE(cp1.getVariablePositions(), s->getVariablePositions());
+
+  int cnt = cp1.getVariableCount();
+  for (int i = 0 ; i < cnt ; ++i)
+  {
+    EXPECT_EQ(cp1.getVariablePositions()[i], 
+              cp2.getVariablePositions()[i]);
+    EXPECT_EQ(cp1.getVariablePositions()[i], 
+              s->getVariablePositions()[i]);
+  }
+
+  // check mim_f == joint_f
+  EXPECT_EQ(s->getVariablePositions()[MIM_F],
+            s->getVariablePositions()[JOINT_F] * 1.5 + 0.1);
+}
+
+// spin, checking the state
+void MyInfo::checkThreadFunc(
+    robot_interaction::LockedRobotState* locked_state,
+    int* counter)
+{
+  bool go = true;
+  while(go)
+  {
+    for (int loops = 0 ; loops < 100 ; ++loops)
+    {
+      checkState(*locked_state);
+    }
+
+    cnt_lock_.lock();
+    go = !quit_;
+    ++*counter;
+    cnt_lock_.unlock();
+  }
+}
+
+// spin, setting the state to different values
+void MyInfo::setThreadFunc(
+    robot_interaction::LockedRobotState* locked_state,
+    int* counter,
+    double offset)
+{
+  bool go = true;
+  while(go)
+  {
+    double val = offset;
+    for (int loops = 0 ; loops < 100 ; ++loops)
+    {
+      val += 0.0001;
+      robot_state::RobotState cp1(*locked_state->getState());
+      
+      cp1.setVariablePosition(JOINT_A, val + 0.00001);
+      cp1.setVariablePosition(JOINT_C, val + 0.00002);
+      cp1.setVariablePosition(JOINT_F, val + 0.00003);
+
+      locked_state->setState(cp1);
+    }
+
+    cnt_lock_.lock();
+    go = !quit_;
+    ++*counter;
+    cnt_lock_.unlock();
+
+    checkState(*locked_state);
+
+    val += 0.000001;
+  }
+}
+
+// spin until all counters reach at least max
+void MyInfo::waitThreadFunc(
+            robot_interaction::LockedRobotState* locked_state,
+            int** counters,
+            int max)
+{
+  bool go = true;
+  while(go)
+  {
+    go = false;
+    cnt_lock_.lock();
+    for (int i = 0 ; counters[i] ; ++i)
+    {
+      if (counters[i][0] < max)
+        go = true;
+    }
+    cnt_lock_.unlock();
+
+    checkState(*locked_state);
+    checkState(*locked_state);
+  }
+  cnt_lock_.lock();
+  quit_ = true;
+  cnt_lock_.unlock();
+}
+
+TEST(LockedRobotState, set2)
+{
+  MyInfo info;
+
+  moveit::core::RobotModelPtr model = getModel();
+  robot_interaction::LockedRobotState ls1(model);
+
+  for (int i = 0 ; i < ls1.getState()->getVariableCount() ; ++i)
+  {
+    printf(" var[%3d] = %s\n",i, ls1.getState()->getVariableNames()[i].c_str());
+  }
+
+  printf("MIM_F:    %f\n",ls1.getState()->getVariablePositions()[MIM_F]);
+  printf("JOINT_F:  %f\n",ls1.getState()->getVariablePositions()[JOINT_F]);
+  printf("          %f\n",ls1.getState()->getVariablePositions()[JOINT_F]
+                          *1.5 + 0.1);
+
+  for (int i = 0 ; i < 1000 ; ++i)
+  {
+    moveit::core::RobotState cp1(*ls1.getState());
+    cp1.setToRandomPositions();
+    cp1.update();
+    ls1.setState(cp1);
+
+#if 0
+    printf("MIM_F:    %f\n",ls1.getState()->getVariablePositions()[MIM_F]);
+    printf("JOINT_F:  %f\n",ls1.getState()->getVariablePositions()[JOINT_F]);
+    printf("          %f\n",ls1.getState()->getVariablePositions()[JOINT_F]
+                            *1.5 + 0.1);
+#endif
+
+    moveit::core::RobotState cp2(*ls1.getState());
+    EXPECT_EQ(cp2.getVariablePositions()[MIM_F],
+              cp2.getVariablePositions()[JOINT_F] * 1.5 + 0.1);
+  }
+
+
+
+
+  int cnt1 = 0;
+  int cnt2 = 0;
+  int cnt3 = 0;
+  int *counters[] = { &cnt1, &cnt2, &cnt3, NULL };
+
+  boost::thread t1(&MyInfo::setThreadFunc,
+                   &info,
+                   &ls1,
+                   &cnt1,
+                   .1);
+
+  boost::thread t2(&MyInfo::setThreadFunc,
+                   &info,
+                   &ls1,
+                   &cnt2,
+                   .2);
+
+  boost::thread t3(&MyInfo::checkThreadFunc,
+                   &info,
+                   &ls1,
+                   &cnt3);
+
+  boost::thread t4(&MyInfo::waitThreadFunc,
+                   &info,
+                   &ls1,
+                   counters,
+                   1000);
+
+  t1.join();
+  t2.join();
+  t3.join();
+  t4.join();
+
+  printf("counts: %d %d %d\n",cnt1,cnt2,cnt3);
 }
 
 int main(int argc, char **argv)
