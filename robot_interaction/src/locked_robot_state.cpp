@@ -74,28 +74,37 @@ robot_state::RobotStateConstPtr
 void robot_interaction::LockedRobotState::setState(
       const robot_state::RobotState& state)
 {
-  boost::unique_lock<boost::mutex> lock(state_lock_);
+  {
+    boost::unique_lock<boost::mutex> lock(state_lock_);
 
-  // If someone else has a reference to the state, then make a new copy.
-  // The old state is orphaned (does not change, but is now out of date).
-  if (state_.unique())
-    *state_ = state;
-  else
-    state_.reset(new robot_state::RobotState(state));
+    // If someone else has a reference to the state, then make a new copy.
+    // The old state is orphaned (does not change, but is now out of date).
+    if (state_.unique())
+      *state_ = state;
+    else
+      state_.reset(new robot_state::RobotState(state));
 
-  state_->update();
+    state_->update();
+  }
+  stateChanged();
 }
 
 void robot_interaction::LockedRobotState::modifyState(
       ModifyStateFunction modify)
 {
-  boost::unique_lock<boost::mutex> lock(state_lock_);
+  {
+    boost::unique_lock<boost::mutex> lock(state_lock_);
 
-  // If someone else has a reference to the state, then make a copy.
-  // The old state is orphaned (does not change, but is now out of date).
-  if (!state_.unique())
-    state_.reset(new robot_state::RobotState(*state_));
+    // If someone else has a reference to the state, then make a copy.
+    // The old state is orphaned (does not change, but is now out of date).
+    if (!state_.unique())
+      state_.reset(new robot_state::RobotState(*state_));
 
-  modify(*state_);
-  state_->update();
+    modify(state_.get());
+    state_->update();
+  }
+  stateChanged();
 }
+
+void robot_interaction::LockedRobotState::stateChanged()
+{}

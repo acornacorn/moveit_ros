@@ -78,7 +78,7 @@ public:
   void setState(const robot_state::RobotState& state);
 
   // This is a function that can modify the maintained state.
-  typedef boost::function<void (robot_state::RobotState&)> ModifyStateFunction;
+  typedef boost::function<void (robot_state::RobotState*)> ModifyStateFunction;
   
   // Modify the state.
   //
@@ -88,15 +88,21 @@ public:
   // function is running.
   void modifyState(ModifyStateFunction modify);
 
+protected:
+  // This is called when the internally maintained state has changed.
+  // This is called with state_lock_ unlocked.
+  // Default definition does nothing.  Override to get notification of state
+  // change.
+  // TODO: is this needed?
+  virtual void stateChanged();
+
 private:
   // this locks all accesses to the state_ member.
   mutable boost::mutex state_lock_;
 
-  // Signalled when state_ was NULL and becomes valid.
-  mutable boost::condition_variable state_available_condition_;
-  
   // The state maintained by this class.
   // When a modify function is being called this is NULL.
+  // PROTECTED BY state_lock_
   robot_state::RobotStatePtr state_;
 };
 

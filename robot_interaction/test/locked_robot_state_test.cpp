@@ -209,6 +209,14 @@ static const char *SRDF_STR =
   "</group>"
   "</robot>";
 
+// index of joints from URDF
+enum {
+  JOINT_A = 3,
+  JOINT_C = 4,
+  MIM_F   = 5,
+  JOINT_F = 6
+};
+
 static moveit::core::RobotModelPtr getModel()
 {
   static moveit::core::RobotModelPtr model;
@@ -222,6 +230,7 @@ static moveit::core::RobotModelPtr getModel()
   return model;
 }
 
+// Test constructors and robot model loading
 TEST(LockedRobotState, load)
 {
   moveit::core::RobotModelPtr model = getModel();
@@ -240,13 +249,62 @@ TEST(LockedRobotState, load)
                     new robot_interaction::LockedRobotState(model));
 }
 
-enum {
-  JOINT_A = 3,
-  JOINT_C = 4,
-  MIM_F   = 5,
-  JOINT_F = 6
+// sanity test the URDF and enum
+TEST(LockedRobotState, URDF_sanity)
+{
+  moveit::core::RobotModelPtr model = getModel();
+  robot_interaction::LockedRobotState ls1(model);
+
+  EXPECT_EQ(ls1.getState()->getVariableNames()[JOINT_A], "joint_a");
+}
+
+// A superclass to test the stateChanged() virtual method
+class Super1 : public robot_interaction::LockedRobotState
+{
+public:
+  Super1(const robot_model::RobotModelPtr& model)
+    : LockedRobotState(model)
+    , cnt_(0)
+  {}
+
+  virtual void stateChanged()
+  {
+    cnt_++;
+  }
+
+  int cnt_;
 };
 
+static void modify1(robot_state::RobotState* state)
+{
+  state->setVariablePosition(JOINT_A, 0.00006);
+}
+
+TEST(LockedRobotState, stateChanged)
+{
+  moveit::core::RobotModelPtr model = getModel();
+
+  Super1 ls1(model);
+
+  EXPECT_EQ(ls1.cnt_, 0);
+
+  robot_state::RobotState cp1(*ls1.getState());
+  cp1.setVariablePosition(JOINT_A, 0.00001);
+  cp1.setVariablePosition(JOINT_C, 0.00002);
+  cp1.setVariablePosition(JOINT_F, 0.00003);
+  ls1.setState(cp1);
+
+  EXPECT_EQ(ls1.cnt_, 1);
+
+  ls1.modifyState(modify1);
+  EXPECT_EQ(ls1.cnt_, 2);
+
+  ls1.modifyState(modify1);
+  EXPECT_EQ(ls1.cnt_, 3);
+}
+
+// Class for testing LockedRobotState in multithreaded environment.
+// Contains thread functions for modifying/checking a LockedRobotState.
 class MyInfo
 {
 public:
@@ -254,26 +312,37 @@ public:
     : quit_(false)
   {}
 
+  // Thread that repeatedly sets state to different values
   void setThreadFunc(robot_interaction::LockedRobotState* locked_state,
                         int* counter,
                         double offset);
+
+  // Thread that repeatedly modifies  state with different values
   void modifyThreadFunc(robot_interaction::LockedRobotState* locked_state,
                         int* counter,
                         double offset);
 
+  // Thread that repeatedly checks that state is valid (not half-updated)
   void checkThreadFunc(robot_interaction::LockedRobotState* locked_state,
                        int* counter);
 
+  // Thread that waits for other threads to complete
   void waitThreadFunc(robot_interaction::LockedRobotState* locked_state,
                       int** counters,
                       int max);
 
-  void modifyFunc( robot_state::RobotState& state, double val);
+private:
+  // helper function for modifyThreadFunc
+  void modifyFunc( robot_state::RobotState* state, double val);
 
+  // Checks state for validity and self-consistancy.
   void checkState(robot_interaction::LockedRobotState &locked_state);
 
+  // mutex protects quit_ and counter variables
   boost::mutex cnt_lock_;
-  boost::condition_variable state_available_condition_;
+
+  // set to true by waitThreadFunc() when all counters have reached at least
+  // max.
   bool quit_;
 };
 
@@ -368,13 +437,14 @@ void MyInfo::setThreadFunc(
   }
 }
 
+// modify the state in place.  Used by MyInfo::modifyThreadFunc()
 void MyInfo::modifyFunc(
-    robot_state::RobotState& state,
+    robot_state::RobotState* state,
     double val)
 {
-  state.setVariablePosition(JOINT_A, val + 0.00001);
-  state.setVariablePosition(JOINT_C, val + 0.00002);
-  state.setVariablePosition(JOINT_F, val + 0.00003);
+  state->setVariablePosition(JOINT_A, val + 0.00001);
+  state->setVariablePosition(JOINT_C, val + 0.00002);
+  state->setVariablePosition(JOINT_F, val + 0.00003);
 }
 
 // spin, modifying the state to different values
@@ -434,6 +504,10 @@ void MyInfo::waitThreadFunc(
   cnt_lock_.unlock();
 }
 
+// Run several threads and ensure they modify the state consistantly
+//   ncheck - # of checkThreadFunc threads to run
+//   nset   - # of setThreadFunc threads to run
+//   nmod   - # of modifyThreadFunc threads to run
 static void runThreads(int ncheck, int nset, int nmod)
 {
   MyInfo info;
