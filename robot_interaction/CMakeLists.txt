@@ -36,6 +36,10 @@ link_directories(${orocos_kdl_LIBRARY_DIRS})
 add_library(${MOVEIT_LIB_NAME}
   src/interactive_marker_helpers.cpp
   src/locked_robot_state.cpp
+  src/imarker.cpp
+  src/imarker_ik.cpp
+  src/robot_interaction_context.cpp
+  src/robot_imarker_handler.cpp
   src/robot_interaction.cpp)
 target_link_libraries(${MOVEIT_LIB_NAME} ${catkin_LIBRARIES} ${Boost_LIBRARIES})
 
