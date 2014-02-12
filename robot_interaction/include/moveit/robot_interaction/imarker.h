@@ -41,12 +41,15 @@
 #include <visualization_msgs/InteractiveMarker.h>
 #include <moveit/robot_interaction/kinematic_options.h>
 
+#include <boost/noncopyable.hpp>
+#include <boost/enable_shared_from_this.hpp>
+#include <boost/thread.hpp>
+
 
 //#include <interactive_markers/menu_handler.h>
 //#include <moveit/robot_state/robot_state.h>
 //#include <moveit/macros/class_forward.h>
 //#include <boost/function.hpp>
-#include <boost/thread.hpp>
 //#include <tf/tf.h>
 
 namespace interactive_markers
@@ -57,54 +60,26 @@ class MenuHandler;
 namespace robot_interaction
 {
 
-class KinematicContext;
 class RobotIMarkerHandler;
 class RobotInteractionContext;
 typedef boost::shared_ptr<RobotInteractionContext> RobotInteractionContextPtr;
+typedef boost::shared_ptr<interactive_markers::MenuHandler> MenuHandlerPtr;
+class KinematicOptions;
+typedef boost::shared_ptr<const KinematicOptions> KinematicOptionsConstPtr;
 
 /// Represents one interactive marker for a RobotIMarkerHandler.
 ///
 /// Subclasses should be implemented
 //
-class IMarker
+class IMarker : private boost::noncopyable,
+                public boost::enable_shared_from_this<IMarker>
 {
 public:
-  IMarker(RobotIMarkerHandler& handler);
   IMarker(RobotIMarkerHandler& handler,
-          const RobotInteractionContextPtr& context);
+          const std::string& name);
   virtual ~IMarker();
 
-  /// Create the interactive marker.
-  /// Subclasses should override this with code that creates the interactive marker.
-  ///  @param state the current robot state.
-  ///  @param marker the interactive marker that this function will fill in.
-  virtual void constructMarker(const robot_state::RobotState &state,
-                               visualization_msgs::InteractiveMarker& marker) = 0;
-
-  // Shared pointer to a menu handler
-  typedef boost::shared_ptr<interactive_markers::MenuHandler> MenuHandlerPtr;
-
-  /// Get menu handler, or NULL if marker should have no menu.
-  /// Subclasses should override this if they want the interactive marker to
-  /// have a right-click context menu.
-  virtual MenuHandlerPtr getMenuHandler();
-
-  /// Process feedback from an interactive marker.
-  /// Subclasses should override this with code that handles feedback.
-  ///  @param feedback_msg the message that describes how the interactive marker moved.
-  ///  @param state the state which should be modified according to how the marker moved.
-  virtual void processFeedback(const visualization_msgs::InteractiveMarkerFeedbackConstPtr& feedback_msg,
-                               robot_state::RobotState &state) = 0;
-
-  /// Update the pose of the marker given a new RobotState
-  /// Subclasses should override this with code that updates the pose of the
-  /// interactive marker when the RobotState changes.
-  ///  @param state (in) the new robot state.
-  ///  @param pose (out) the new pose of the marker based on the state.
-  virtual void updatePose(const robot_state::RobotState &state,
-                          geometry_msgs::Pose& pose) = 0;
-
-  // Get the handler managing this IMarker.
+  //. Get the handler managing this IMarker.
   RobotIMarkerHandler& getHandler();
   const RobotIMarkerHandler& getHandler() const;
 
@@ -112,15 +87,89 @@ public:
   /// Subclasses can use this to get information they need to implement the above functions
   const RobotInteractionContext& getContext() const;
 
+  /// get marker name for this interaction
+  const std::string& getMarkerName() const;
+  /// get name of this interaction (set in constructor)
+  const std::string& getName() const;
+
+  /// Set kinematic options specific to this IMarkerIK.
+  /// If this is not called the KinematicOptions from RobotInteractionContext
+  /// will be used.
+  void setKinematicOptions(const KinematicOptions& options);
+
+  /// Get kinematic options.
+  /// If getKinematicOptions() was called, returns those options.  Otherwise
+  /// returns options from the RobotInteractionContext.
+  KinematicOptions getKinematicOptions() const;
+
+
+  /// remove the marker from the InteractiveMarkerServer and destroy it.
+  void destroy();
+
+  // get the marker message
+  void getMarkerMsg(visualization_msgs::InteractiveMarker& marker);
+
+  // the feedback function called by the InteractiveMarkerServer
+  void feedbackFunction(const visualization_msgs::InteractiveMarkerFeedbackConstPtr& feedback);
+
+  // Called when the state has changed and we need to update the pose of the marker.
+  void updatePose();
+
+protected:
+  /// Create the interactive marker.
+  /// Subclasses should override this with code that creates the interactive marker.
+  ///  @param state the current robot state.
+  ///  @param marker the interactive marker that this function will fill in.
+  /// This is called with lock_ already held.
+  virtual void doConstructMarker(const robot_state::RobotState &state,
+                                 visualization_msgs::InteractiveMarker& marker) = 0;
+
+  /// Get menu handler, or NULL if marker should have no menu.
+  /// Subclasses should override this if they want the interactive marker to
+  /// have a right-click context menu.
+  /// This is called with lock_ already held.
+  virtual MenuHandlerPtr doGetMenuHandler();
+
+  /// Process feedback from an interactive marker.
+  /// Subclasses should override this with code that handles feedback.
+  ///  @param feedback_msg the message that describes how the interactive marker moved.
+  ///  @param state the state which should be modified according to how the marker moved.
+  /// This is called with lock_ already held.
+  virtual void doProcessFeedback(const visualization_msgs::InteractiveMarkerFeedbackConstPtr& feedback_msg,
+                                 robot_state::RobotState &state) = 0;
+
+  /// Update the pose of the marker given a new RobotState
+  /// Subclasses should override this with code that updates the pose of the
+  /// interactive marker when the RobotState changes.
+  ///  @param state (in) the new robot state.
+  ///  @param pose (out) the new pose of the marker based on the state.
+  /// This is called with lock_ already held.
+  virtual void doUpdatePose(const robot_state::RobotState &state,
+                            geometry_msgs::Pose& pose) = 0;
+
+  // locks access to mutable state
+  mutable boost::mutex lock_;
+
 private:
   RobotInteractionContextPtr context_;
   RobotIMarkerHandler& handler_;
 
+  // interactivity name set in constructor.
+  // Never changes -- no locking needed.
+  const std::string name_;
 
-protected:
-  // locks access to mutable state (any subclass member variables that can
-  // change after construction).
-  mutable boost::mutex lock_;
+  // marker name.
+  // Never changes after construction -- no locking needed.
+  const std::string marker_name_;
+
+  // Parameters for RobotState::setFromIK().
+  // PROTECTED BY lock_
+  KinematicOptionsConstPtr kinematic_options_;
+
+  // set to true when destroy() is called.
+  // This prevents feedbackFunction() from running after destroy() is called.
+  // PROTECTED BY lock_
+  bool destroyed_;
 };
 
 typedef boost::shared_ptr<IMarker> IMarkerPtr;

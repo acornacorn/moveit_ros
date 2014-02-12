@@ -1,8 +1,6 @@
 /*********************************************************************
  * Software License Agreement (BSD License)
  *
- *  Copyright (c) 2012-2013, Willow Garage, Inc.
- *  Copyright (c) 2013, Ioan A. Sucan
  *  Copyright (c) 2014, SRI International
  *  All rights reserved.
  *
@@ -34,11 +32,11 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  *********************************************************************/
 
-/* Author: Acorn Pooley, Ioan Sucan, Adam Leeper */
+/* Author: Acorn Pooley */
 
-#include <moveit/robot_interaction/robot_imarker_handler.h>
+#include <moveit/robot_interaction/kinematic_options.h>
 
-//#include <moveit/robot_interaction/robot_interaction.h>
+
 //#include <moveit/robot_interaction/interactive_marker_helpers.h>
 //#include <moveit/transforms/transforms.h>
 //#include <interactive_markers/interactive_marker_server.h>
@@ -53,36 +51,27 @@
 //#include <Eigen/Core>
 //#include <Eigen/Geometry>
 
-robot_interaction::RobotIMarkerHandler::RobotIMarkerHandler(
-      const robot_state::RobotState &state,
-      const RobotInteractionContextPtr& context,
-      const std::string& handler_name,
-      StateChangedFn state_changed_function)
-: LockedRobotState(state)
-, IMarkerContainer(context)
-, name_(handler_name)
-, state_changed_callback_(state_changed_function)
-{}
+robot_interaction::KinematicOptions::KinematicOptions()
+: timeout_seconds_(0.0) // 0.0 = use default timeout
+, max_attempts_(0)      // 0 = use default max attempts
+{ }
 
-robot_interaction::RobotIMarkerHandler::RobotIMarkerHandler(
-      const robot_model::RobotModelConstPtr &model,
-      const RobotInteractionContextPtr& context,
-      const std::string& handler_name,
-      StateChangedFn state_changed_function)
-: LockedRobotState(model)
-, IMarkerContainer(context)
-, name_(handler_name)
-, state_changed_callback_(state_changed_function)
-{}
-
-robot_interaction::RobotIMarkerHandler::~RobotIMarkerHandler()
-{}
-
-void robot_interaction::RobotIMarkerHandler::stateChanged()
+// This is intended to be called as a ModifyStateFunction to modify the state
+// maintained by a LockedRobotState in place.
+void robot_interaction::KinematicOptions::setStateFromIK(
+      robot_state::RobotState* state,
+      const std::string* group,
+      const std::string* tip,
+      const geometry_msgs::Pose* pose,
+      bool* result) const
 {
-  if (state_changed_callback_)
-    state_changed_callback_(*this);
+  const robot_model::JointModelGroup *jmg = state->getJointModelGroup(*group);
+  *result = state->setFromIK(jmg,
+                            *pose,
+                            *tip,
+                            max_attempts_,
+                            timeout_seconds_,
+                            state_validity_callback_,
+                            options_);
 }
-
-
 

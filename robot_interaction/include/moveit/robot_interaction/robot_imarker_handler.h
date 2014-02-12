@@ -60,37 +60,33 @@ typedef boost::shared_ptr<IMarker> IMarkerPtr;
 //
 // Any number of IMarker objects can be added.  Each IMarker object represents
 // one interactive marker which can be manipulated to adjust the robot state.
-class RobotIMarkerHandler : public LockedRobotState
+class RobotIMarkerHandler : public LockedRobotState,
+                            public IMarkerContainer
 {
 public:
-  RobotIMarkerHandler(const robot_state::RobotState &state,
-                     const RobotInteractionContextPtr& context);
-
-  RobotIMarkerHandler(const robot_model::RobotModelConstPtr &model,
-                     const RobotInteractionContextPtr& context);
-
-  virtual ~RobotIMarkerHandler();
-
-  /// Add one interactive marker.
-  // This interaction is defined by the IMarker subclass.
-  // \returns an id for removing this interaction
-  int add(const IMarkerPtr& marker);
-
-  /// Remove one interactive marker.
-  /// @param marker_id the id returned when add was called.
-  void remove(int marker_id);
-
-  /// Remove all interactive markers.
-  void clear();
-
-  /// Get the default context for this handler.
-  RobotInteractionContextPtr getContext() const;
-
   /// Function type for callback when RobotState changes.
   typedef boost::function<void(RobotIMarkerHandler& handler)> StateChangedFn;
 
-  /// Set a function to be called whenever the RobotState changes
-  void setStateChangedCallback(StateChangedFn& callback);
+  RobotIMarkerHandler(const robot_state::RobotState &state,
+                      const RobotInteractionContextPtr& context,
+                      const std::string& handler_name,
+                      StateChangedFn state_changed_function);
+
+  RobotIMarkerHandler(const robot_model::RobotModelConstPtr &model,
+                      const RobotInteractionContextPtr& context,
+                      const std::string& handler_name,
+                      StateChangedFn state_changed_function);
+
+  virtual ~RobotIMarkerHandler();
+
+  // Return the RobotInteractionContext associated with this handler.
+  RobotInteractionContextPtr getContext() const;
+
+  /// Return the handler's name.
+  const std::string& getName() const { return name_; }
+
+  /// remove all IMarkers from this handler.
+  void clear();
 
 protected:
   // This is called (by LockedRobotState) when the internally maintained state
@@ -98,23 +94,11 @@ protected:
   virtual void stateChanged();
 
 private:
-  RobotInteractionContextPtr context_;
-
-  // Protects the markers_ map and next_id_
-  mutable boost::mutex markers_mutex_;
-
-  // List of active IMarkers, indexed by their integer id
-  // PROTECTED BY markers_mutex_
-  // NOTE: markers_mutex_ protects the map but not the IMarkers in the map.
-  std::map<int,IMarkerPtr> markers_;
-
-  // The next available IMarker id
-  // PROTECTED BY markers_mutex_
-  int next_id_;
+  // name of handler
+  const std::string name_;
 
   // Callback to indicate state has changed
-  // TODO: protect access?
-  StateChangedFn state_changed_callback_;
+  const StateChangedFn state_changed_callback_;
 };
 
 typedef boost::shared_ptr<RobotIMarkerHandler> RobotIMarkerHandlerPtr;
@@ -125,7 +109,12 @@ typedef boost::shared_ptr<const RobotIMarkerHandler> RobotIMarkerHandlerConstPtr
 inline robot_interaction::RobotInteractionContextPtr
 robot_interaction::RobotIMarkerHandler::getContext() const
 {
-  return context_;
+  return IMarkerContainer::getContext();
+}
+
+inline void robot_interaction::RobotIMarkerHandler::clear()
+{
+  IMarkerContainer::clear();
 }
 
 

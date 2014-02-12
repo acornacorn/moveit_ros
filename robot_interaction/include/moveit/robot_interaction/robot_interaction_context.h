@@ -62,14 +62,14 @@ class Transformer;
 
 namespace robot_interaction
 {
+typedef boost::shared_ptr<tf::Transformer> TransformerPtr;
+typedef boost::shared_ptr<interactive_markers::InteractiveMarkerServer>
+                                             InteractiveMarkerServerPtr;
 
 // Context for interaction with a robot.
 class RobotInteractionContext
 {
 public:
-  typedef boost::shared_ptr<tf::Transformer> TransformerPtr;
-  typedef boost::shared_ptr<interactive_markers::InteractiveMarkerServer>
-                                             InteractiveMarkerServerPtr;
 
   /// Construct with existing InteractiveMarkerServer
   // \param marker_server existing InteractiveMarkerServer to use.
@@ -89,6 +89,16 @@ public:
   void setKinematicOptions(const KinematicOptions& kinematic_options);
   KinematicOptions getKinematicOptions() const;
 
+  // Used by IMarker objects to lock access to options
+  boost::recursive_mutex& getOptionsMutex() const { return options_lock_; }
+
+  // add a marker to the server
+  // Called by IMarkerContainer::add()
+  void addIMarker(const IMarkerPtr& imarker);
+
+  // add a marker to the server
+  // Called by IMarkerContainer::remove()
+  void removeIMarker(const IMarkerPtr& imarker);
 
 private:
   /// The topic name on which the internal Interactive Marker Server operates
@@ -103,12 +113,8 @@ private:
   TransformerPtr tf_;
   
 
-  // lock_ must be locked for access to most members of this class.
-  //   Exceptions: lock_ need not be locked to access:
-  //     int_marker_server_
-  //     nh_
-  //     tf_
-  mutable boost::recursive_mutex lock_;
+  // options_lock_ protects the options members.
+  mutable boost::recursive_mutex options_lock_;
 
   // Parameters for calling RobotState::setFromIK()
   // PROTECTED BY lock_

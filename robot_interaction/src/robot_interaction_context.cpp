@@ -86,14 +86,14 @@ robot_interaction::RobotInteractionContext::~RobotInteractionContext()
 void robot_interaction::RobotInteractionContext::setKinematicOptions(
       const KinematicOptions& kinematic_options)
 {
-  boost::unique_lock<boost::recursive_mutex> lock(lock_);
+  //boost::unique_lock<boost::recursive_mutex> lock(lock_);
   kinematic_options_ = kinematic_options;
 }
 
 robot_interaction::KinematicOptions
 robot_interaction::RobotInteractionContext::getKinematicOptions() const
 {
-  boost::unique_lock<boost::recursive_mutex> lock(lock_);
+  //boost::unique_lock<boost::recursive_mutex> lock(lock_);
   return kinematic_options_;
 }
 

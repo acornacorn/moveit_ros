@@ -34,12 +34,10 @@
 
 /* Author: Acorn Pooley */
 
+#include <moveit/robot_interaction/imarker_container.h>
 #include <moveit/robot_interaction/imarker.h>
-#include <moveit/robot_interaction/robot_imarker_handler.h>
-#include <moveit/robot_interaction/kinematic_options.h>
 
-#include <interactive_markers/menu_handler.h>
-
+//#include <moveit/robot_interaction/robot_interaction.h>
 //#include <moveit/robot_interaction/interactive_marker_helpers.h>
 //#include <moveit/transforms/transforms.h>
 //#include <interactive_markers/interactive_marker_server.h>
@@ -54,72 +52,74 @@
 //#include <Eigen/Core>
 //#include <Eigen/Geometry>
 
-robot_interaction::IMarker::IMarker(
-      RobotIMarkerHandler& handler,
-      const std::string& name)
-: handler_(handler)
-, context_(handler.getContext())
-, name_(name)
-, marker_name_(handler.getName() + ":" + name)
-, destroyed_(false)
-{
-  handler_.IMarkerContainer::insert(shared_from_this());
-}
-
-robot_interaction::IMarker::~IMarker()
+robot_interaction::IMarkerContainer::IMarkerContainer(
+      InteractiveMarkerServerPtr server)
+: int_marker_server_(server)
 {}
 
-void robot_interaction::IMarker::destroy()
+robot_interaction::IMarkerContainer::~IMarkerContainer()
+{
+  // remove IMarkers while int_marker_server_ is still valid
+  clear();
+}
+
+int robot_interaction::RobotIMarkerHandler::insert(
+      const IMarkerPtr& imarker)
+{
+  visualization_msgs::InteractiveMarker marker;
+  interactive_markers::FeedbackCallback callback;
+  imarker->getMarkerMsg(marker);
+  imarker->getMarkerFeedbackCallback(callback);
+  marker.name = imarker.getNarkerName();
+
+  // insert the marker into the server.
+  // Using the shared pointer imarker forces the server to keep a reference to
+  // the IMarker until the IMarker has been removed from the server.
+  //
+  // The marker will not actually be broadcast until
+  // int_marker_server_->applyChanges() is called later.
+  int_marker_server_->insert(marker, boost::bind(&IMarker::feedbackFunction,
+                                                 imarker,
+                                                 _1));
+
+  boost::unique_lock<boost::mutex> lock(lock_);
+  imarkers_[imarker.getNarkerName()] = imarker;
+}
+
+void robot_interaction::RobotIMarkerHandler::erase(
+      const IMarkerPtr& imarker)
 {
   {
-    boost::mutex::scoped_lock lock(lock_);
-    destroyed_ = true;
+    boost::unique_lock<boost::mutex> lock(lock_);
+    imarkers_.erase(imarker.getNarkerName());
   }
-  handler_.IMarkerContainer::erase(shared_from_this());
+
+  // This will usually delete the IMarker since the server holds a reference to
+  // it in the callback closure.
+  //
+  // The removal (and deletion) does not actually occur until
+  // int_marker_server_->applyChanges() is called later.
+  int_marker_server_->erase(imarker.getNarkerName());
 }
 
-void robot_interaction::IMarker::feedbackFunction(
-      const visualization_msgs::InteractiveMarkerFeedbackConstPtr& feedback)
+void robot_interaction::RobotIMarkerHandler::clear()
 {
-  // TODO: do we need to throttle this if messages come too fast?
+  boost::unique_lock<boost::mutex> lock(lock_);
+  while (!imarkers_.empty())
+  {
+    std::map<std::string, IMarkerPtr>::iterator it = imarkers_.begin();
+    IMarker& imarker = *it->second;
+    imarkers_.erase(it);
 
-  boost::mutex::scoped_lock lock(lock_);
-  if (destroyed_)
-    return;
-
-  // modify the state in the handler (in place) by calling back to the
-  // doProcessFeedback() method.
-  handler_.LockedRobotState::modifyState(boost::bind(
-                &IMarker::doProcessFeedback,
-                this,
-                feedback,
-                _1));
+    // This schedules the IMarker to be deleted next time
+    // int_marker_server_->applyChanges() is called.
+    int_marker_server_->erase(imarker.getNarkerName());
+  }
 }
 
-void robot_interaction::IMarker::getMarkerMsg(
-      visualization_msgs::InteractiveMarker& marker)
+void robot_interaction::RobotIMarkerHandler::setPose(
+      const IMarkerPtr& imarker,
+      const geometry_msgs::Pose& pose)
 {
+  int_marker_server_->setPose(imarker->getNarkerName(), pose);
 }
-
-robot_interaction::MenuHandlerPtr
-robot_interaction::IMarker::getMenuHandler()
-{
-  return MenuHandlerPtr();
-}
-
-robot_interaction::KinematicOptions
-robot_interaction::IMarker::getKinematicOptions() const
-{
-  boost::mutex::scoped_lock lock(lock_);
-  return kinematic_options_ ? *kinematic_options_ :
-                              getContext().getKinematicOptions();
-}
-
-void robot_interaction::IMarker::setKinematicOptions(
-      const KinematicOptions& options)
-{
-  boost::mutex::scoped_lock lock(lock_);
-  kinematic_options_.reset(new KinematicOptions(options));
-}
-
-

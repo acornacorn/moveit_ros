@@ -46,30 +46,40 @@ namespace robot_interaction
 // Options for inverse kinematics calculations.
 struct KinematicOptions
 {
-  /// Constructor - set to reasonable default values
+public: 
+  /// Constructor - set all options to reasonable default values
   KinematicOptions();
 
+  /// Set \e state using inverse kinematics
+  /// @param state the state to set
+  /// @param group name of group whose joints can move
+  /// @param tip link that will be posed
+  /// @param pose desired pose of tip link
+  /// @param result true if IK succeeded.
+  void setStateFromIK(robot_state::RobotState* state,
+                      const std::string* group,
+                      const std::string* tip,
+                      const geometry_msgs::Pose* pose,
+                      bool* result) const;
+
+  // All members are public.
+
   /// max time an IK attempt can take before we give up.
-  double timeout_seconds;
+  double timeout_seconds_;
 
   /// how many attempts before we give up.
-  unsigned int max_attempts;
+  unsigned int max_attempts_;
 
   /// other options
-  kinematics::KinematicsQueryOptions options;
+  kinematics::KinematicsQueryOptions options_;
 
   /// This is called to determine if the state is valid
-  robot_state::GroupStateValidityCallbackFn state_validity_callback;
+  robot_state::GroupStateValidityCallbackFn state_validity_callback_;
 };
 
 typedef boost::shared_ptr<KinematicOptions> KinematicOptionsPtr;
 typedef boost::shared_ptr<const KinematicOptions> KinematicOptionsConstPtr;
 
 }
-
-inline robot_interaction::KinematicOptions::KinematicOptions()
-: timeout_seconds(0.0) // 0.0 = use default timeout
-, max_attempts(0)      // 0 = use default max attempts
-{ }
 
 #endif
